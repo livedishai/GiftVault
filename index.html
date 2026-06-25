@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Progress Gift Center - AR Experience</title>
+    
+    <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/hiukim/mind-ar-js@1.1.5/dist/mindar-image-aframe.prod.js"></script>
+
+    <style>
+        body { margin: 0; overflow: hidden; font-family: sans-serif; }
+        
+        /* Loading overlay screen style */
+        #statusOverlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #FFFDF9; z-index: 9999;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            text-align: center; color: #ea580c; padding: 20px; box-sizing: border-box;
+        }
+        .spinner {
+            width: 50px; height: 50px; border: 5px solid #ffedd5;
+            border-top: 5px solid #ea580c; border-radius: 50%;
+            animation: spin 1s linear infinite; margin-bottom: 20px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        /* Scan UI prompt instruction */
+        #scanPrompt {
+            position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+            background: rgba(234, 88, 12, 0.85); color: white;
+            padding: 12px 24px; border-radius: 30px; font-weight: bold;
+            font-size: 14px; z-index: 99; tracking-wide: uppercase;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2); pointer-events: none; display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="statusOverlay">
+        <div class="spinner"></div>
+        <h2 id="statusText" style="margin:0 0 8px 0; uppercase">Setting Up Camera Engine...</h2>
+        <p id="statusSubtext" style="margin:0; color:#9a3412; font-size:13px;">Preparing your personalized AR gift experience</p>
+    </div>
+
+    <div id="scanPrompt">📸 Point camera at your physical gift frame</div>
+
+    <div id="sceneContainer"></div>
+
+    <script>
+        // CONFIGURATION: Paste your exact Web App Deployment URL here!
+        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzXkEqSHcB83SVUE76N4ALGRiYDDg2YhDtJyJBbTpfmgB321IYhgg_QBQGf7pYGBJlv/exec";
+
+        // 1. Extract the order code parameter from the scanning link
+        const urlParams = new URLSearchParams(window.location.search);
+        const orderId = urlParams.get('order');
+
+        if (!orderId) {
+            showError("Invalid Link", "No order identifier detected. Please scan a valid QR code provided by Progress Gift Center.");
+        } else {
+            fetchOrderData(orderId);
+        }
+
+        // 2. Fetch tracking details from Google Sheets via database API 
+        async function fetchOrderData(id) {
+            document.getElementById('statusText').innerText = "Fetching Order Details...";
+            try {
+                const response = await fetch(`${APPS_SCRIPT_URL}?orderId=${id}`);
+                const data = await response.json();
+
+                if (data.status === "success") {
+                    initARScene(data.mindUrl, data.videoUrl);
+                } else if (data.status === "not_found") {
+                    showError("Order Not Found", `Order ID ${id} could not be matched in our delivery system.`);
+                } else {
+                    showError("Data Error", "Unable to extract files from database index row.");
+                }
+            } catch (err) {
+                showError("Network Error", "Could not connect safely to remote database server.");
+            }
+        }
+
+        // 3. Dynamically inject MindAR layout matching target parameters
+        function initARScene(mindUrl, videoUrl) {
+            document.getElementById('statusText').innerText = "Downloading AR Tracking Profiles...";
+            
+            const container = document.getElementById('sceneContainer');
+            
+            // Build the HTML structures safely for A-Frame components
+            container.innerHTML = `
+                <a-scene mindar-image="imageTargetSrc: ${mindUrl}; autoStart: true; uiLoading: no; uiError: no; uiScanning: no;" 
+                         embedded color-space="sRGB" renderer="colorManagement: true, sortObjects: true" 
+                         vr-mode-ui="enabled: false" gesture-detector>
+                    
+                    <a-assets>
+                        <video id="arVideo" src="${videoUrl}" preload="auto" loop="true" crossOrigin="anonymous" playsinline webkit-playsinline></video>
+                    </a-assets>
+
+                    <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+
+                    <a-entity mindar-image-target="targetIndex: 0" id="targetEntity">
+                        <a-video src="#arVideo" position="0 0 0" height="1" width="1" rotation="0 0 0"></a-video>
+                    </a-entity>
+                </a-scene>
+            `;
+
+            const sceneEl = document.querySelector('a-scene');
+            const videoEl = document.querySelector('#arVideo');
+            const targetEl = document.querySelector('#targetEntity');
+
+            // Wait for MindAR framework processing system completely ready
+            sceneEl.addEventListener("ready", () => {
+                document.getElementById('statusOverlay').style.display = 'none';
+                document.getElementById('scanPrompt').style.display = 'block';
+            });
+
+            // Target Image matched and visual anchor found events
+            targetEl.addEventListener("targetFound", () => {
+                document.getElementById('scanPrompt').style.display = 'none';
+                videoEl.play();
+            });
+
+            // Target Image lost out of tracking sight boundaries
+            targetEl.addEventListener("targetLost", () => {
+                document.getElementById('scanPrompt').style.display = 'block';
+                videoEl.pause();
+            });
+        }
+
+        function showError(title, message) {
+            const overlay = document.getElementById('statusOverlay');
+            const spinner = document.querySelector('.spinner');
+            if(spinner) spinner.style.display = 'none';
+            overlay.innerHTML = `
+                <h1 style="color: #dc2626; font-size: 24px; margin-bottom: 10px;">⚠️ ${title}</h1>
+                <p style="color: #4b5563; max-width: 300px; font-size: 14px; line-height: 1.5;">${message}</p>
+            `;
+        }
+    </script>
+</body>
+</html>
